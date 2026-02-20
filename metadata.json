@@ -1,0 +1,7 @@
+{
+  "name": "Remix: QR-Inventory Master",
+  "description": "A serialized equipment inventory and borrowing management system featuring QR code tracking and Google Form integration.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
