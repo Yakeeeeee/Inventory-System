@@ -21,6 +21,7 @@ const Transactions: React.FC = () => {
   
   const [isBorrowModalOpen, setIsBorrowModalOpen] = useState(false);
   const [isReturnModalOpen, setIsReturnModalOpen] = useState(false);
+  const [returningItems, setReturningItems] = useState<EquipmentItem[]>([]);
   const [isReleaseModalOpen, setIsReleaseModalOpen] = useState(false);
   const [isRejectModalOpen, setIsRejectModalOpen] = useState(false);
   
@@ -28,6 +29,9 @@ const Transactions: React.FC = () => {
   const [qrValue, setQrValue] = useState('');
   const [scannedItem, setScannedItem] = useState<any>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [returnCondition, setReturnCondition] = useState<ItemCondition>(ItemCondition.GOOD);
+  const [returnRemarks, setReturnRemarks] = useState<string>('');
+  const [selectedItemsForReturn, setSelectedItemsForReturn] = useState<EquipmentItem[]>([]);
   
   // New Workflow State
   const [currentSession, setCurrentSession] = useState<BorrowSession | null>(null);
@@ -103,6 +107,11 @@ const Transactions: React.FC = () => {
     const finalValue = (value || qrValue).trim();
     if (!finalValue) return;
 
+    if (isReturnModalOpen) {
+      handleScanForReturn(finalValue);
+      return;
+    }
+
     const item = items.find(i => i.qrCodeValue === finalValue || i.serialNumber === finalValue);
     
     if (item) {
@@ -176,6 +185,56 @@ const Transactions: React.FC = () => {
     setIsBorrowModalOpen(false);
     setCurrentSession(null);
     resetScanner();
+  };
+
+  const handleCompleteMultiReturn = () => {
+    if (returningItems.length === 0) {
+      setErrorMessage('Please scan at least one item to return.');
+      return;
+    }
+    returningItems.forEach(item => {
+      const tx = transactions.find(t => t.itemId === item.id && t.status === TransactionStatus.BORROWED);
+      if (tx) {
+        completeTransaction(tx.id, returnCondition, returnRemarks);
+      }
+    });
+    setIsReturnModalOpen(false);
+    resetScanner();
+    setReturningItems([]);
+    setReturnRemarks('');
+    setReturnCondition(ItemCondition.GOOD);
+    setErrorMessage(null);
+  };
+
+  const handleScanForReturn = (scannedValue?: string) => {
+    const value = scannedValue || qrValue;
+    if (!value) return;
+
+    const item = items.find(i => i.qrCodeValue === value || i.serialNumber === value);
+    if (!item) {
+      setErrorMessage('Item not found.');
+      return;
+    }
+    if (item.status !== ItemStatus.BORROWED) {
+      setErrorMessage(`Item ${item.serialNumber} is not currently borrowed.`);
+      return;
+    }
+    if (returningItems.some(i => i.id === item.id)) {
+      setErrorMessage(`Item ${item.serialNumber} already added for return.`);
+      return;
+    }
+
+    setReturningItems(prev => [...prev, item]);
+    setQrValue('');
+    setErrorMessage(null);
+  };
+
+  const handleCheckboxChange = (item: EquipmentItem) => {
+    setSelectedItemsForReturn(prev => 
+      prev.some(selectedItem => selectedItem.id === item.id)
+        ? prev.filter(selectedItem => selectedItem.id !== item.id)
+        : [...prev, item]
+    );
   };
 
   const handleHandoverReservation = (tx: Transaction) => {
@@ -691,6 +750,18 @@ const Transactions: React.FC = () => {
                                   CANCEL SESSION
                                 </button>
                               )}
+                              {selectedItemsForReturn.length > 0 && (
+                                <button
+                                  onClick={() => {
+                                    setReturningItems(selectedItemsForReturn);
+                                    setIsReturnModalOpen(true);
+                                    setSelectedItemsForReturn([]); // Clear selection after initiating return
+                                  }}
+                                  className="text-xs font-bold bg-indigo-600 text-white hover:bg-indigo-700 px-2 py-1 rounded transition-colors"
+                                >
+                                  RETURN SELECTED ({selectedItemsForReturn.length})
+                                </button>
+                              )}
                             </div>
                             <div className="flex items-center gap-3">
                                {![SessionStatus.COMPLETED, SessionStatus.CANCELLED, SessionStatus.REJECTED].includes(session.status) && (
@@ -717,6 +788,7 @@ const Transactions: React.FC = () => {
                           <table className="w-full text-left text-xs">
                             <thead className="bg-slate-50 text-slate-500 font-bold uppercase">
                               <tr>
+                                <th className="px-4 py-2 w-8"></th>
                                 <th className="px-4 py-2">Equipment</th>
                                 <th className="px-4 py-2">Serial Number</th>
                                 <th className="px-4 py-2">Status</th>
@@ -730,6 +802,16 @@ const Transactions: React.FC = () => {
                                 const isReleased = session.releasedItemIds?.includes(itemId);
                                 return (
                                   <tr key={itemId}>
+                                    <td className="px-4 py-3">
+                                      <input 
+                                        type="checkbox" 
+                                        checked={selectedItemsForReturn.some(selectedItem => selectedItem.id === item?.id)}
+                                        onChange={() => handleCheckboxChange(item!)}
+                                        disabled={sessionTx?.status === TransactionStatus.RETURNED || item?.status !== ItemStatus.BORROWED}
+                                        className="form-checkbox h-4 w-4 text-indigo-600 transition duration-150 ease-in-out rounded"
+                                      />
+                                    </td>
+
                                     <td className="px-4 py-3 font-medium text-slate-900">{item?.name}</td>
                                     <td className="px-4 py-3 font-mono text-slate-500">{item?.serialNumber}</td>
                                     <td className="px-4 py-3">
@@ -1144,79 +1226,93 @@ const Transactions: React.FC = () => {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
               <h2 className="text-xl font-bold text-slate-900">Return Equipment</h2>
-              <button onClick={() => { setIsReturnModalOpen(false); resetScanner(); }} className="text-slate-400 text-2xl hover:text-slate-600">&times;</button>
+              <button onClick={() => { setIsReturnModalOpen(false); resetScanner(); setReturningItems([]); setReturnRemarks(''); setReturnCondition(ItemCondition.GOOD); }} className="text-slate-400 hover:text-slate-600 transition-colors">
+                {ICONS.X}
+              </button>
             </div>
             <div className="p-6">
-              {errorMessage && <ErrorAlert message={errorMessage} />}
-              {!scannedItem ? (
-                <div className="flex flex-col items-center">
-                  {isScannerActive ? (
-                    <div className="relative overflow-hidden rounded-xl bg-black aspect-square w-full max-w-sm mx-auto shadow-inner">
-                      <div id="scanner-container-return" className="w-full h-full"></div>
-                      <div className="scanner-line"></div>
-                      <button onClick={stopScanner} className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-white/20 backdrop-blur-md text-white px-4 py-2 rounded-lg text-sm font-bold border border-white/30 hover:bg-white/30 transition-all z-20">Cancel Camera</button>
+              {errorMessage && <ErrorAlert message={errorMessage} />} 
+
+              {returningItems.length > 0 && (
+                <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100 mb-4">
+                  <div className="flex justify-between items-start mb-2">
+                    <div>
+                      <p className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest">Items to Return</p>
+                      <p className="font-bold text-slate-900">{returningItems.length} Item(s)</p>
                     </div>
-                  ) : (
-                    <div className="p-8 border-2 border-dashed border-slate-200 rounded-xl bg-slate-50 w-full flex flex-col items-center">
-                      <div className="bg-emerald-600 p-4 rounded-full text-white mb-4">{ICONS.QR}</div>
-                      <p className="font-bold text-slate-900 mb-4">Scan QR to Return</p>
-                      <div className="flex w-full gap-2 mb-4">
-                        <input className="flex-1 px-4 py-3 border border-slate-200 rounded-xl font-mono text-center uppercase tracking-widest text-xl focus:ring-4 focus:ring-emerald-100 outline-none" placeholder="SERIAL NUMBER" autoFocus value={qrValue} onChange={(e) => setQrValue(e.target.value.toUpperCase())} onKeyDown={(e) => e.key === 'Enter' && handleScan()} />
-                        <button onClick={() => startScanner('scanner-container-return')} className="bg-slate-100 text-slate-600 p-4 rounded-xl hover:bg-slate-200 transition-colors">{ICONS.Camera}</button>
-                      </div>
-                      <button onClick={() => handleScan()} className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold hover:bg-slate-800 transition-all">Process Return</button>
-                    </div>
-                  )}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {returningItems.map(item => (
+                      <span key={item.id} className="bg-white border border-indigo-200 px-2 py-1 rounded text-[10px] font-bold text-indigo-700 flex items-center gap-1">
+                        {item.serialNumber}
+                        <button onClick={() => setReturningItems(prev => prev.filter(i => i.id !== item.id))} className="text-rose-500 hover:text-rose-700">{ICONS.X}</button>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {isScannerActive ? (
+                <div className="relative overflow-hidden rounded-xl bg-black aspect-square max-w-sm mx-auto shadow-inner">
+                  <div id="return-scanner-container" className="w-full h-full"></div>
+                  <div className="scanner-line"></div>
+                  <button onClick={stopScanner} className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-white/20 backdrop-blur-md text-white px-4 py-2 rounded-lg text-sm font-bold border border-white/30 hover:bg-white/30 transition-all z-20">Cancel Camera</button>
                 </div>
               ) : (
-                <div className="space-y-6 animate-in fade-in zoom-in-95 duration-200">
-                  <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-100 flex justify-between items-center">
-                    <div>
-                      <p className="text-[10px] font-bold text-emerald-600 uppercase">Receiving Item</p>
-                      <p className="font-bold text-slate-900 text-lg">{scannedItem.name}</p>
-                      <p className="text-xs text-slate-600 font-mono">SN: {scannedItem.serialNumber}</p>
-                    </div>
-                    <button type="button" onClick={resetScanner} className="text-xs text-emerald-600 underline font-bold hover:text-emerald-800 transition-colors">Rescan</button>
+                <div className="p-6 border-2 border-dashed border-slate-200 rounded-xl bg-slate-50 flex flex-col items-center">
+                  <div className="bg-indigo-600 p-4 rounded-full text-white mb-4 animate-pulse">{ICONS.QR}</div>
+                  <p className="font-bold text-slate-900 mb-1">Scan Item for Return</p>
+                  <p className="text-slate-500 text-xs mb-6 text-center">Scan QR codes one by one to add to the return list</p>
+                  <div className="flex w-full gap-2 mb-4">
+                    <input className="flex-1 px-4 py-3 border border-slate-200 rounded-xl font-mono text-center uppercase text-xl tracking-widest focus:ring-4 focus:ring-indigo-100 outline-none" placeholder="SERIAL NUMBER" autoFocus value={qrValue} onChange={(e) => setQrValue(e.target.value.toUpperCase())} onKeyDown={(e) => e.key === 'Enter' && handleScanForReturn()} />
+                    <button onClick={() => startScanner('return-scanner-container')} className="bg-slate-100 text-slate-600 p-4 rounded-xl hover:bg-slate-200 transition-colors">{ICONS.Camera}</button>
                   </div>
-                  {(() => {
-                    const activeTx = transactions.find(t => t.itemId === scannedItem.id && t.status === TransactionStatus.BORROWED);
-                    if (!activeTx) return (
-                      <div className="p-4 bg-rose-50 text-rose-700 rounded-lg text-sm font-medium">
-                        No active loan record found.
-                        <button onClick={resetScanner} className="block mt-2 underline font-bold hover:text-rose-900 transition-colors">Try another scan</button>
-                      </div>
-                    );
-                    return (
-                      <div className="space-y-4">
-                        <div className="p-4 bg-slate-50 rounded-xl">
-                          <p className="text-xs text-slate-500 mb-1">Currently with</p>
-                          <p className="font-bold text-slate-900">{activeTx.borrowerName}</p>
-                          <p className="text-xs text-slate-500">ID: {activeTx.borrowerIdNumber}</p>
-                        </div>
-                        <div>
-                          <label className="block text-sm font-semibold text-slate-700 mb-1">Return Condition</label>
-                          <div className="flex gap-2">
-                            {Object.values(ItemCondition).map(cond => (
-                              <button key={cond} type="button" onClick={() => setScannedItem({...scannedItem, condition: cond})} className={`flex-1 py-2 rounded-lg text-sm font-bold border transition-all ${scannedItem.condition === cond ? 'bg-emerald-600 text-white border-emerald-600 shadow-md' : 'bg-white text-slate-600 border-slate-200 hover:border-emerald-300'}`}>{cond}</button>
-                            ))}
-                          </div>
-                        </div>
-                        <div>
-                          <label className="block text-sm font-semibold text-slate-700 mb-1">Return Notes</label>
-                          <textarea id="returnRemarks" className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500/20 outline-none" placeholder="Is the item okay?" />
-                        </div>
-                        <div className="flex justify-end gap-3 pt-6 border-t border-slate-100">
-                          <button onClick={() => { setIsReturnModalOpen(false); resetScanner(); }} className="px-6 py-2 text-slate-600 font-medium hover:bg-slate-50 rounded-lg transition-colors">Cancel</button>
-                          <button onClick={() => {
-                              const remarks = (document.getElementById('returnRemarks') as HTMLTextAreaElement).value;
-                              completeTransaction(activeTx.id, scannedItem.condition, remarks);
-                              setIsReturnModalOpen(false);
-                              resetScanner();
-                            }} className="px-6 py-2 bg-emerald-600 text-white rounded-xl font-bold shadow-lg shadow-emerald-100 hover:bg-emerald-700 transition-all">Finalize Return</button>
-                        </div>
-                      </div>
-                    );
-                  })()}
+                  <div className="grid grid-cols-2 w-full gap-3">
+                    <button onClick={() => handleScanForReturn()} className="bg-slate-900 text-white py-3 rounded-xl font-bold hover:bg-slate-800 transition-all">Add Item</button>
+                    <button 
+                      onClick={handleCompleteMultiReturn}
+                      disabled={returningItems.length === 0}
+                      className={`py-3 rounded-xl font-bold transition-all shadow-lg ${returningItems.length === 0 ? 'bg-slate-300 text-slate-500' : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-indigo-100'}`}
+                    >
+                      Complete Return ({returningItems.length})
+                    </button>
+                  </div>
+                  <button 
+                    onClick={() => { setIsReturnModalOpen(false); resetScanner(); setReturningItems([]); setReturnRemarks(''); setReturnCondition(ItemCondition.GOOD); }}
+                    className="w-full mt-3 text-xs text-rose-600 font-bold hover:underline"
+                  >
+                    Cancel Return
+                  </button>
+                </div>
+              )}
+
+              {returningItems.length > 0 && (
+                <div className="space-y-4 mt-6">
+                  <div>
+                    <label htmlFor="returnCondition" className="block text-sm font-semibold text-slate-700 mb-1">Return Condition</label>
+                    <div className="flex gap-2">
+                      {Object.values(ItemCondition).map(cond => (
+                        <button 
+                          key={cond} 
+                          type="button" 
+                          onClick={() => setReturnCondition(cond)}
+                          className={`flex-1 py-2 rounded-lg text-sm font-bold border transition-all ${returnCondition === cond ? 'bg-emerald-600 text-white border-emerald-600 shadow-md' : 'bg-white text-slate-600 border-slate-200 hover:border-emerald-300'}`}
+                        >
+                          {cond}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label htmlFor="returnRemarks" className="block text-sm font-semibold text-slate-700 mb-1">Return Notes</label>
+                    <textarea 
+                      id="returnRemarks" 
+                      className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500/20 outline-none"
+                      placeholder="Is the item okay?" 
+                      value={returnRemarks}
+                      onChange={(e) => setReturnRemarks(e.target.value)}
+                    />
+                  </div>
                 </div>
               )}
             </div>
