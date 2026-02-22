@@ -669,6 +669,25 @@ export function useInventoryStore() {
     updateSession({ ...session, status: SessionStatus.PENDING_APPROVAL });
   };
 
+  const removeItemFromSession = (sessionId: string, itemId: string) => {
+    const session = state.sessions.find(s => s.id === sessionId);
+    if (!session) return;
+
+    const updatedSession = {
+      ...session,
+      itemIds: session.itemIds.filter(id => id !== itemId)
+    };
+    
+    // If item was reserved, make it available again
+    const item = state.items.find(i => i.id === itemId);
+    if (item && item.status === ItemStatus.RESERVED) {
+      updateItem({ ...item, status: ItemStatus.AVAILABLE });
+    }
+
+    updateSession(updatedSession);
+    addLog('REMOVE_ITEM', `Removed item ${item?.serialNumber} from session ${session.sessionCode}`, itemId);
+  };
+
   const approveSession = (sessionId: string) => {
     const session = state.sessions.find(s => s.id === sessionId);
     if (!session) return;
@@ -801,6 +820,7 @@ export function useInventoryStore() {
     createSession,
     updateSession,
     addItemToSession,
+    removeItemFromSession,
     submitSessionForApproval,
     approveSession,
     rejectSession,

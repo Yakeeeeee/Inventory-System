@@ -9,8 +9,8 @@ import { Html5Qrcode } from 'html5-qrcode';
 const Transactions: React.FC = () => {
   const { 
     transactions, items, sessions, 
-    completeTransaction, updateItem, updateTransaction,
-    createSession, addItemToSession, submitSessionForApproval,
+    completeTransaction, updateItem, updateTransaction, updateSession,
+    createSession, addItemToSession, removeItemFromSession, submitSessionForApproval,
     approveSession, rejectSession, releaseItemInSession, cancelSession, deleteSession,
     checkOverdueTransactions
   } = useInventoryStore();
@@ -37,6 +37,7 @@ const Transactions: React.FC = () => {
   
   const [expandedSessionId, setExpandedSessionId] = useState<string | null>(null);
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
+  const [isEditingSession, setIsEditingSession] = useState(false);
   
   // Search and Filter State
   const [searchTerm, setSearchTerm] = useState('');
@@ -135,11 +136,28 @@ const Transactions: React.FC = () => {
     const formData = new FormData(e.currentTarget);
     const data: any = Object.fromEntries(formData.entries());
 
+    if (isEditingSession && currentSession) {
+      const updatedSession = {
+        ...currentSession,
+        borrowerName: data.borrowerName,
+        borrowerIdNumber: data.borrowerId,
+        department: data.department,
+        contactInfo: data.contact,
+        purpose: data.purpose,
+        expectedReturnDate: data.dueDate,
+      };
+      updateSession(updatedSession);
+      setIsEditingSession(false);
+      setIsBorrowModalOpen(false);
+      setCurrentSession(null);
+      return;
+    }
+
     const session = createSession({
       borrowerName: data.borrowerName,
       borrowerIdNumber: data.borrowerId,
       department: data.department,
-      contactNumber: data.contact,
+      contactInfo: data.contact,
       purpose: data.purpose,
       requestedDate: new Date().toISOString(),
       expectedReturnDate: data.dueDate,
@@ -391,7 +409,7 @@ const Transactions: React.FC = () => {
               onChange={(e) => setStatusFilter(e.target.value)}
             >
               <option value="all">All Statuses</option>
-              <option value={SessionStatus.ACTIVE}>Active Loans</option>
+              <option value={SessionStatus.ACTIVE}>Ongoing Sessions</option>
               <option value={SessionStatus.PENDING_APPROVAL}>Pending Approval</option>
               <option value={SessionStatus.APPROVED}>Ready for Release</option>
               <option value={SessionStatus.RELEASED}>Released</option>
@@ -636,7 +654,60 @@ const Transactions: React.FC = () => {
                   {expandedSessionId === session.id && (
                     <tr className="bg-slate-50/30">
                       <td colSpan={8} className="px-12 py-4">
-                        <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+                        <div className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden">
+                          {/* Session Header Actions */}
+                          <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                            <div className="flex flex-wrap items-center gap-3">
+                              <span className="text-[10px] font-bold text-slate-400 uppercase">Session Actions:</span>
+                              {session.status === SessionStatus.PENDING_APPROVAL && userRole === 'Admin' && (
+                                <>
+                                  <button 
+                                    onClick={() => approveSession(session.id)}
+                                    className="text-xs font-bold text-emerald-600 hover:bg-emerald-50 px-2 py-1 rounded transition-colors"
+                                  >
+                                    APPROVE ALL
+                                  </button>
+                                  <button 
+                                    onClick={() => { setRejectingSession(session); setIsRejectModalOpen(true); }}
+                                    className="text-xs font-bold text-rose-600 hover:bg-rose-50 px-2 py-1 rounded transition-colors"
+                                  >
+                                    REJECT
+                                  </button>
+                                </>
+                              )}
+                              {session.status === SessionStatus.APPROVED && (
+                                <button 
+                                  onClick={() => { setReleasingSession(session); setIsReleaseModalOpen(true); }}
+                                  className="text-xs font-bold text-indigo-600 hover:bg-indigo-50 px-2 py-1 rounded transition-colors"
+                                >
+                                  RELEASE ITEMS
+                                </button>
+                              )}
+                              {(session.status === SessionStatus.PENDING_APPROVAL || session.status === SessionStatus.APPROVED || session.status === SessionStatus.PENDING_SCANNING) && (
+                                <button 
+                                  onClick={() => { if (confirm('Cancel this entire session?')) cancelSession(session.id); }}
+                                  className="text-xs font-bold text-slate-500 hover:bg-slate-100 px-2 py-1 rounded transition-colors"
+                                >
+                                  CANCEL SESSION
+                                </button>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-3">
+                               {![SessionStatus.COMPLETED, SessionStatus.CANCELLED, SessionStatus.REJECTED].includes(session.status) && (
+                                 <button 
+                                   onClick={() => { 
+                                     setCurrentSession(session); 
+                                     setIsEditingSession(true);
+                                     setIsBorrowModalOpen(true); 
+                                   }}
+                                   className="text-xs font-bold text-indigo-600 hover:underline flex items-center gap-1"
+                                 >
+                                   {ICONS.Edit} EDIT DETAILS
+                                 </button>
+                               )}
+                            </div>
+                          </div>
+
                           {session.status === SessionStatus.REJECTED && session.rejectionReason && (
                             <div className="bg-rose-50 p-4 border-b border-rose-100">
                               <p className="text-xs font-bold text-rose-800 uppercase mb-1">Rejection Reason</p>
@@ -673,46 +744,39 @@ const Transactions: React.FC = () => {
                                     </td>
                                     <td className="px-4 py-3 text-right">
                                       <div className="flex flex-col items-end gap-2">
-                                        <div className="flex gap-2">
-                                            {sessionTx?.status === TransactionStatus.BORROWED && (
-                                              <button 
-                                                onClick={() => {
-                                                  setIsReturnModalOpen(true);
-                                                  setQrValue(item?.qrCodeValue || '');
-                                                  handleScan(item?.qrCodeValue);
-                                                }}
-                                                className="text-indigo-600 font-bold hover:underline"
-                                              >
-                                                RETURN
-                                              </button>
-                                            )}
-                                            {!isReleased && session.status === SessionStatus.APPROVED && (
-                                              <span className="text-[10px] text-amber-600 font-bold uppercase">Awaiting Release</span>
-                                            )}
+                                        <div className="flex gap-3">
+                                          {/* Mark as Returned Action */}
+                                          {((isReleased || session.status === SessionStatus.ACTIVE) && sessionTx?.status !== TransactionStatus.RETURNED) && (
+                                            <button 
+                                              onClick={() => {
+                                                setIsReturnModalOpen(true);
+                                                setQrValue(item?.qrCodeValue || '');
+                                                handleScan(item?.qrCodeValue);
+                                              }}
+                                              className="text-indigo-600 font-bold hover:underline text-[10px] uppercase"
+                                            >
+                                              Mark as Returned
+                                            </button>
+                                          )}
+                                          
+                                          {/* Remove/Cancel Action */}
+                                          {(session.status === SessionStatus.PENDING_APPROVAL || session.status === SessionStatus.APPROVED || session.status === SessionStatus.PENDING_SCANNING) && !isReleased && (
+                                            <button 
+                                              onClick={() => {
+                                                if (confirm(`Remove ${item?.name} from this session?`)) {
+                                                  removeItemFromSession(session.id, itemId);
+                                                }
+                                              }}
+                                              className="text-rose-600 font-bold hover:underline text-[10px] uppercase"
+                                            >
+                                              Remove/Cancel
+                                            </button>
+                                          )}
+
+                                          {!isReleased && session.status === SessionStatus.APPROVED && (
+                                            <span className="text-[10px] text-amber-600 font-bold uppercase bg-amber-50 px-2 py-0.5 rounded">Awaiting Release</span>
+                                          )}
                                         </div>
-                                        
-                                          {/* Item History Snippet */}
-                                          <div className="mt-2 text-left w-full border-t border-slate-50 pt-2">
-                                            <p className="text-[9px] font-bold text-slate-400 uppercase mb-1">
-                                              {sessionTx?.status === TransactionStatus.RETURNED ? 'Previous Borrowers' : 'Recent History'}
-                                            </p>
-                                            <div className="space-y-1">
-                                              {transactions
-                                                .filter(t => t.itemId === itemId && t.status === TransactionStatus.RETURNED && t.id !== sessionTx?.id)
-                                                .sort((a, b) => new Date(b.dateReturned || '').getTime() - new Date(a.dateReturned || '').getTime())
-                                                .slice(0, 2)
-                                                .map(prevTx => (
-                                                  <div key={prevTx.id} className="bg-slate-50 p-1.5 rounded flex justify-between items-center text-[10px]">
-                                                    <span className="text-slate-600 font-medium">{prevTx.borrowerName}</span>
-                                                    <span className="text-slate-400">{new Date(prevTx.dateReturned || '').toLocaleDateString()}</span>
-                                                  </div>
-                                                ))
-                                              }
-                                              {transactions.filter(t => t.itemId === itemId && t.status === TransactionStatus.RETURNED && t.id !== sessionTx?.id).length === 0 && (
-                                                <p className="text-[9px] text-slate-400 italic">No previous records</p>
-                                              )}
-                                            </div>
-                                          </div>
                                       </div>
                                     </td>
                                   </tr>
@@ -925,12 +989,19 @@ const Transactions: React.FC = () => {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
               <div>
-                <h2 className="text-xl font-bold text-slate-900">New Borrow Session</h2>
+                <h2 className="text-xl font-bold text-slate-900">{isEditingSession ? 'Edit Session Details' : 'New Borrow Session'}</h2>
                 <p className="text-xs text-slate-500">
-                  {!currentSession ? 'Step 1: Borrower Information' : 'Step 2: Scan Equipment'}
+                  {isEditingSession ? 'Update borrower information' : (!currentSession ? 'Step 1: Borrower Information' : 'Step 2: Scan Equipment')}
                 </p>
               </div>
               <button onClick={() => { 
+                if (isEditingSession) {
+                  setIsBorrowModalOpen(false);
+                  setIsEditingSession(false);
+                  setCurrentSession(null);
+                  resetScanner();
+                  return;
+                }
                 if (currentSession && currentSession.itemIds.length > 0) {
                   if (confirm('Cancel this session and release scanned items?')) {
                     cancelSession(currentSession.id);
@@ -948,47 +1019,57 @@ const Transactions: React.FC = () => {
                   resetScanner(); 
                   setCurrentSession(null);
                 }
-              }} className="text-slate-400 text-2xl hover:text-slate-600">&times;</button>
+              }} className="text-slate-400 hover:text-slate-600 transition-colors">
+                {ICONS.X}
+              </button>
             </div>
             
             <div className="p-6">
               {errorMessage && <ErrorAlert message={errorMessage} />}
               
-              {!currentSession ? (
+              {(!currentSession || isEditingSession) ? (
                 <form onSubmit={handleStartBorrowSession} className="space-y-4">
                   <div className="grid grid-cols-2 gap-4">
                     <div className="col-span-2">
                       <label className="block text-sm font-semibold text-slate-700 mb-1">Borrower Full Name</label>
-                      <input required name="borrowerName" className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 outline-none" placeholder="e.g. John Doe" />
+                      <input required name="borrowerName" defaultValue={currentSession?.borrowerName || ''} className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 outline-none" placeholder="e.g. John Doe" />
                     </div>
                     <div>
                       <label className="block text-sm font-semibold text-slate-700 mb-1">Student / Staff ID</label>
-                      <input required name="borrowerId" className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 outline-none" placeholder="ID Number" />
+                      <input required name="borrowerId" defaultValue={currentSession?.borrowerIdNumber || ''} className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 outline-none" placeholder="ID Number" />
                     </div>
                     <div>
                       <label className="block text-sm font-semibold text-slate-700 mb-1">Department</label>
-                      <input required name="department" className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 outline-none" placeholder="e.g. IT, Arts" />
+                      <input required name="department" defaultValue={currentSession?.department || ''} className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 outline-none" placeholder="e.g. IT, Arts" />
                     </div>
                     <div>
                       <label className="block text-sm font-semibold text-slate-700 mb-1">Contact Number</label>
-                      <input required name="contact" className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 outline-none" placeholder="Phone/Email" />
+                      <input required name="contact" defaultValue={currentSession?.contactInfo || ''} className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 outline-none" placeholder="Phone/Email" />
                     </div>
                     <div>
                       <label className="block text-sm font-semibold text-slate-700 mb-1">Expected Return</label>
-                      <input required type="date" name="dueDate" className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 outline-none" defaultValue={new Date(Date.now() + 86400000).toISOString().split('T')[0]} />
+                      <input required type="date" name="dueDate" defaultValue={currentSession?.expectedReturnDate ? new Date(currentSession.expectedReturnDate).toISOString().split('T')[0] : new Date(Date.now() + 86400000).toISOString().split('T')[0]} className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 outline-none" />
                     </div>
                     <div className="col-span-2">
                       <label className="block text-sm font-semibold text-slate-700 mb-1">Purpose of Borrowing</label>
-                      <textarea required name="purpose" className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 outline-none" placeholder="Project name, event, etc." />
+                      <textarea required name="purpose" defaultValue={currentSession?.purpose || ''} className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 outline-none" placeholder="Project name, event, etc." />
                     </div>
                   </div>
                   <div className="flex justify-end gap-3 pt-6 border-t border-slate-100">
                     <button type="button" onClick={() => {
+                      if (isEditingSession) {
+                        setIsBorrowModalOpen(false);
+                        setIsEditingSession(false);
+                        setCurrentSession(null);
+                        return;
+                      }
                       if (currentSession) cancelSession(currentSession.id);
                       setIsBorrowModalOpen(false);
                       setCurrentSession(null);
                     }} className="px-6 py-2 text-slate-600 font-medium hover:bg-slate-50 rounded-lg transition-colors">Cancel</button>
-                    <button type="submit" className="px-6 py-2 bg-indigo-600 text-white rounded-xl font-bold shadow-lg shadow-indigo-100 hover:bg-indigo-700 transition-all">Start Scanning</button>
+                    <button type="submit" className="px-6 py-2 bg-indigo-600 text-white rounded-xl font-bold shadow-lg shadow-indigo-100 hover:bg-indigo-700 transition-all">
+                      {isEditingSession ? 'Save Changes' : 'Start Scanning'}
+                    </button>
                   </div>
                 </form>
               ) : (
