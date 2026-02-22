@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import { EquipmentItem, Category, Transaction, MaintenanceLog, AuditLog, ItemStatus, ItemCondition, TransactionStatus, BorrowSession, SessionStatus } from './types';
 import { MOCK_CATEGORIES } from './constants';
 
-const STORAGE_KEY = 'qr_inventory_data_v7';
+const STORAGE_KEY = 'qr_inventory_data_v8';
 
 interface AppState {
   items: EquipmentItem[];
@@ -567,7 +567,7 @@ export function useInventoryStore() {
       dateReturned: new Date().toISOString(),
       status: TransactionStatus.RETURNED,
       conditionOnReturn: returnCondition,
-      remarks: tx.remarks + ' | Return Notes: ' + remarks
+      returnRemarks: remarks
     };
 
     setState(prev => ({
@@ -661,11 +661,6 @@ export function useInventoryStore() {
       itemIds: [...session.itemIds, itemId]
     };
     updateSession(updatedSession);
-
-    const item = state.items.find(i => i.id === itemId);
-    if (item) {
-      updateItem({ ...item, status: ItemStatus.RESERVED });
-    }
   };
 
   const submitSessionForApproval = (sessionId: string) => {
@@ -677,38 +672,74 @@ export function useInventoryStore() {
   const approveSession = (sessionId: string) => {
     const session = state.sessions.find(s => s.id === sessionId);
     if (!session) return;
+    
+    // Reserve items upon approval
+    session.itemIds.forEach(itemId => {
+      const item = state.items.find(i => i.id === itemId);
+      if (item && item.status === ItemStatus.AVAILABLE) {
+        updateItem({ ...item, status: ItemStatus.RESERVED });
+      }
+    });
+
     updateSession({ ...session, status: SessionStatus.APPROVED });
+    addLog('APPROVE', `Approved session: ${session.sessionCode}`, undefined);
   };
 
-  const releaseSessionItems = (sessionId: string) => {
+  const rejectSession = (sessionId: string, reason: string) => {
+    const session = state.sessions.find(s => s.id === sessionId);
+    if (!session) return;
+    
+    updateSession({ 
+      ...session, 
+      status: SessionStatus.REJECTED, 
+      rejectionReason: reason 
+    });
+    addLog('REJECT', `Rejected session: ${session.sessionCode}. Reason: ${reason}`, undefined);
+  };
+
+  const releaseItemInSession = (sessionId: string, itemId: string) => {
     const session = state.sessions.find(s => s.id === sessionId);
     if (!session) return;
 
-    const now = new Date().toISOString();
-    updateSession({ ...session, status: SessionStatus.ACTIVE, dateReleased: now });
+    const releasedItemIds = session.releasedItemIds || [];
+    if (releasedItemIds.includes(itemId)) return;
 
-    session.itemIds.forEach(itemId => {
-      const item = state.items.find(i => i.id === itemId);
-      if (item) {
-        updateItem({ ...item, status: ItemStatus.BORROWED });
-        
-        const tx: Transaction = {
-          id: `tx-${Date.now()}-${itemId}`,
-          itemId,
-          borrowerName: session.borrowerName,
-          borrowerIdNumber: session.borrowerIdNumber,
-          contactNumber: session.contactNumber,
-          dateRequested: session.requestedDate,
-          dateBorrowed: now,
-          dueDate: session.expectedReturnDate,
-          status: TransactionStatus.BORROWED,
-          conditionOnRelease: item.condition,
-          remarks: `Session: ${session.sessionCode} | Purpose: ${session.purpose}`,
-          googleFormReferenceId: session.sessionCode
-        };
-        addTransaction(tx);
-      }
+    const item = state.items.find(i => i.id === itemId);
+    if (!item) return;
+
+    const now = new Date().toISOString();
+    const newReleasedItemIds = [...releasedItemIds, itemId];
+    
+    // Update item status
+    updateItem({ ...item, status: ItemStatus.BORROWED });
+
+    // Create transaction
+    const tx: Transaction = {
+      id: `tx-${Date.now()}-${itemId}`,
+      itemId,
+      borrowerName: session.borrowerName,
+      borrowerIdNumber: session.borrowerIdNumber,
+      contactNumber: session.contactNumber,
+      dateRequested: session.requestedDate,
+      dateBorrowed: now,
+      dueDate: session.expectedReturnDate,
+      status: TransactionStatus.BORROWED,
+      conditionOnRelease: item.condition,
+      remarks: `Session: ${session.sessionCode} | Purpose: ${session.purpose}`,
+      googleFormReferenceId: session.sessionCode
+    };
+    addTransaction(tx);
+
+    // Update session
+    const isFullyReleased = newReleasedItemIds.length === session.itemIds.length;
+    updateSession({ 
+      ...session, 
+      releasedItemIds: newReleasedItemIds,
+      status: isFullyReleased ? SessionStatus.RELEASED : session.status,
+      dateReleased: isFullyReleased ? now : session.dateReleased
     });
+
+    addLog('RELEASE', `Released item ${item.serialNumber} for session ${session.sessionCode}`, itemId);
   };
 
   const cancelSession = (sessionId: string) => {
@@ -739,6 +770,22 @@ export function useInventoryStore() {
     addLog('DELETE', `Deleted session record ID: ${sessionId}`);
   };
 
+  const checkOverdueTransactions = () => {
+    const now = new Date();
+    let updated = false;
+    const newTransactions = state.transactions.map(tx => {
+      if (tx.status === TransactionStatus.BORROWED && new Date(tx.dueDate) < now) {
+        updated = true;
+        return { ...tx, status: TransactionStatus.OVERDUE };
+      }
+      return tx;
+    });
+
+    if (updated) {
+      setState(prev => ({ ...prev, transactions: newTransactions }));
+    }
+  };
+
   return {
     ...state,
     addItem,
@@ -756,8 +803,10 @@ export function useInventoryStore() {
     addItemToSession,
     submitSessionForApproval,
     approveSession,
-    releaseSessionItems,
+    rejectSession,
+    releaseItemInSession,
     cancelSession,
-    deleteSession
+    deleteSession,
+    checkOverdueTransactions
   };
 }

@@ -1,9 +1,10 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useInventoryStore } from '../store';
 import { ItemStatus, ItemCondition, EquipmentItem, TransactionStatus, Transaction } from '../types';
 import { ICONS, getQRImageUrl } from '../constants';
 import { StatusBadge, ConditionBadge } from '../components/StatusBadge';
+import { QRCodeCanvas } from 'qrcode.react';
 
 const Inventory: React.FC = () => {
   const { items, categories, transactions, addItem, updateItem, deleteItem, addTransaction } = useInventoryStore();
@@ -15,6 +16,15 @@ const Inventory: React.FC = () => {
   const [borrowingItem, setBorrowingItem] = useState<EquipmentItem | null>(null);
   const [reservingItem, setReservingItem] = useState<EquipmentItem | null>(null);
   const [historyItem, setHistoryItem] = useState<EquipmentItem | null>(null);
+  const [liveSerialNumber, setLiveSerialNumber] = useState('');
+
+  useEffect(() => {
+    if (editingItem) {
+      setLiveSerialNumber(editingItem.serialNumber);
+    } else {
+      setLiveSerialNumber('');
+    }
+  }, [editingItem, isModalOpen]);
 
   const filteredItems = items.filter(item => {
     const matchesSearch = item.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
@@ -395,10 +405,11 @@ const Inventory: React.FC = () => {
             </div>
             <div className="p-8 flex flex-col items-center gap-6" id="printable-qr">
               <div className="bg-white p-4 border border-slate-100 rounded-2xl shadow-inner">
-                <img 
-                  src={getQRImageUrl(qrViewItem.qrCodeValue)} 
-                  alt={`QR code for ${qrViewItem.name}`}
-                  className="w-48 h-48 block"
+                <QRCodeCanvas 
+                  value={qrViewItem.qrCodeValue} 
+                  size={200}
+                  includeMargin={true}
+                  className="block"
                 />
               </div>
               <div className="text-center">
@@ -434,14 +445,42 @@ const Inventory: React.FC = () => {
             </div>
             <form onSubmit={handleSave} className="p-6 space-y-4">
               <div className="grid grid-cols-2 gap-4">
-                <div className="col-span-2">
-                  <label className="block text-sm font-semibold text-slate-700 mb-1">Item Name</label>
-                  <input required name="name" defaultValue={editingItem?.name} className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 outline-none" placeholder="e.g. Sony Alpha A7" />
+                <div className="col-span-2 flex flex-col md:flex-row gap-6 items-start">
+                  <div className="flex-1 space-y-4 w-full">
+                    <div>
+                      <label className="block text-sm font-semibold text-slate-700 mb-1">Item Name</label>
+                      <input required name="name" defaultValue={editingItem?.name} className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 outline-none" placeholder="e.g. Sony Alpha A7" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-slate-700 mb-1">Serial Number</label>
+                      <input 
+                        required 
+                        name="serialNumber" 
+                        defaultValue={editingItem?.serialNumber} 
+                        onChange={(e) => setLiveSerialNumber(e.target.value)}
+                        className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 outline-none" 
+                        placeholder="Unique S/N" 
+                      />
+                    </div>
+                  </div>
+                  
+                  <div className="w-full md:w-auto flex flex-col items-center justify-center p-4 bg-slate-50 border border-slate-200 rounded-xl">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase mb-2 tracking-widest">Live QR Preview</p>
+                    <div className="bg-white p-2 rounded-lg shadow-sm border border-slate-100">
+                      {liveSerialNumber ? (
+                        <QRCodeCanvas value={liveSerialNumber} size={100} />
+                      ) : (
+                        <div className="w-[100px] h-[100px] flex items-center justify-center text-slate-300 italic text-[10px] text-center px-2">
+                          Enter S/N to generate
+                        </div>
+                      )}
+                    </div>
+                    <p className="mt-2 text-[10px] font-mono text-slate-500 truncate max-w-[120px]">
+                      {liveSerialNumber || 'NO DATA'}
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-1">Serial Number</label>
-                  <input required name="serialNumber" defaultValue={editingItem?.serialNumber} className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 outline-none" placeholder="Unique S/N" />
-                </div>
+
                 <div>
                   <label className="block text-sm font-semibold text-slate-700 mb-1">Category</label>
                   <select name="categoryId" defaultValue={editingItem?.categoryId} className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500/20 outline-none">

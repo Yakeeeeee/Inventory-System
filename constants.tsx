@@ -22,7 +22,11 @@ import {
   Printer,
   Handshake,
   Camera,
-  Pencil
+  Pencil,
+  X,
+  Check,
+  ChevronUp,
+  ChevronDown
 } from 'lucide-react';
 
 export const ICONS = {
@@ -47,7 +51,12 @@ export const ICONS = {
   ChevronRight: <ChevronRight size={16} />,
   Print: <Printer size={16} />,
   Borrow: <Handshake size={16} />,
-  Camera: <Camera size={16} />
+  Camera: <Camera size={16} />,
+  X: <X size={16} />,
+  Check: <Check size={16} />,
+  ChevronUp: <ChevronUp size={16} />,
+  ChevronDown: <ChevronDown size={16} />,
+  Package: <Package size={16} />
 };
 
 export const MOCK_CATEGORIES = [

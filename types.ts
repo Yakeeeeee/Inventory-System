@@ -48,6 +48,7 @@ export enum SessionStatus {
   APPROVED = 'Approved',
   REJECTED = 'Rejected',
   ACTIVE = 'Active',
+  RELEASED = 'Released',
   COMPLETED = 'Completed',
   CANCELLED = 'Cancelled'
 }
@@ -66,6 +67,8 @@ export interface BorrowSession {
   dateCompleted?: string;
   status: SessionStatus;
   itemIds: string[];
+  rejectionReason?: string;
+  releasedItemIds?: string[];
 }
 
 export interface Transaction {
@@ -82,6 +85,7 @@ export interface Transaction {
   conditionOnRelease: ItemCondition;
   conditionOnReturn?: ItemCondition;
   remarks: string;
+  returnRemarks?: string;
   googleFormReferenceId: string;
 }
 
